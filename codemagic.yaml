@@ -19,6 +19,8 @@ workflows:
       - name: Build Android APK
         script: | 
           cd android
+          # Force execution permission for the gradle wrapper
+          chmod +x gradlew 
           ./gradlew assembleDebug
     artifacts:
       - android/app/build/outputs/apk/debug/*.apk
