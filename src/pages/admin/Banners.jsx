@@ -1,39 +1,81 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { supabase } from '../../lib/supabase'; //
 
+/**
+ * Admin Banners Component
+ * Terminal for managing promotional slides synced with Supabase.
+ */
 export default function Banners() {
   const [banners, setBanners] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [preview, setPreview] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const [formData, setFormData] = useState({ 
     title: '', 
     tag: '', 
     color: 'from-primary/30', 
     image: '', 
-    type: 'text' // tracks 'text' or 'image' mode
+    type: 'text' 
   });
 
-  useEffect(() => {
-    const saved = JSON.parse(localStorage.getItem('kilogram_banners') || '[]');
-    setBanners(saved);
+  // 1. Fetch Banners from Supabase
+  const fetchBanners = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('banners')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setBanners(data || []);
+    } catch (err) {
+      console.error("Fetch Error:", err.message);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchBanners();
+  }, [fetchBanners]);
 
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
+    if (!file) return;
+
     const reader = new FileReader();
     reader.onloadend = () => {
       setPreview(reader.result);
       setFormData({ ...formData, image: reader.result, type: 'image', title: '' });
     };
-    if (file) reader.readAsDataURL(file);
+    reader.readAsDataURL(file);
   };
 
-  const saveBanner = (e) => {
+  // 2. Persist to Supabase
+  const saveBanner = async (e) => {
     e.preventDefault();
-    const updated = [...banners, { ...formData, id: Date.now() }];
-    localStorage.setItem('kilogram_banners', JSON.stringify(updated));
-    setBanners(updated);
-    resetForm();
-    window.dispatchEvent(new Event('storage'));
+    setIsSubmitting(true);
+
+    try {
+      const { error } = await supabase
+        .from('banners')
+        .insert([{ 
+          ...formData, 
+          created_at: new Date().toISOString() 
+        }]);
+
+      if (error) throw error;
+
+      resetForm();
+      fetchBanners();
+    } catch (err) {
+      alert("Publish failed: " + err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const resetForm = () => {
@@ -42,113 +84,163 @@ export default function Banners() {
     setFormData({ title: '', tag: '', color: 'from-primary/30', image: '', type: 'text' });
   };
 
-  const deleteBanner = (id) => {
-    const updated = banners.filter(b => b.id !== id);
-    localStorage.setItem('kilogram_banners', JSON.stringify(updated));
-    setBanners(updated);
-    window.dispatchEvent(new Event('storage'));
+  // 3. Delete from Supabase
+  const deleteBanner = async (id) => {
+    if (!window.confirm("Terminate this banner track?")) return;
+
+    try {
+      const { error } = await supabase
+        .from('banners')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+      setBanners(prev => prev.filter(b => b.id !== id));
+    } catch (err) {
+      alert("Delete failed: " + err.message);
+    }
   };
 
   return (
-    <div className="h-full flex flex-col animate-in fade-in duration-500">
-      <div className="flex justify-between items-center mb-8 shrink-0">
-        <div>
-          <h1 className="text-3xl font-black italic uppercase tracking-tighter">Marketing Banners</h1>
-          <p className="text-gray-500 text-[10px] font-black uppercase tracking-widest mt-1">Manage store-front slides</p>
+    <div className="h-full flex flex-col animate-in fade-in duration-700">
+      <div className="flex justify-between items-center mb-10 shrink-0">
+        <div className="space-y-1">
+          <h1 className="text-4xl font-black italic uppercase tracking-tighter text-white">
+            Marketing <span className="text-primary">Banners</span>
+          </h1>
+          <p className="text-[10px] text-gray-500 font-black uppercase tracking-[0.3em]">Cloud Asset Management Suite</p>
         </div>
-        <button onClick={() => setShowModal(true)} className="bg-primary text-black px-6 py-3 rounded-xl font-black text-[10px] uppercase shadow-lg shadow-primary/20 hover:scale-105 transition-all">
-          + Add New Slide
+        <button 
+          onClick={() => setShowModal(true)} 
+          className="bg-primary text-black px-8 py-3 rounded-2xl font-black text-[16px]  shadow-lg shadow-primary/20 hover:scale-105 transition-all active:scale-95"
+        >
+          + New Banner
         </button>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 overflow-y-auto no-scrollbar pb-10">
-        {banners.map(banner => (
-          <div key={banner.id} className={`glass-card overflow-hidden border-white/5 flex justify-between items-center group relative h-32`}>
-            {/* Background Layer */}
-            {banner.type === 'image' ? (
-              <img src={banner.image} className="absolute inset-0 w-full h-full object-cover opacity-60" alt="" />
-            ) : (
-              <div className={`absolute inset-0 bg-gradient-to-r ${banner.color} to-transparent opacity-40`} />
-            )}
+      {loading ? (
+        <div className="flex-1 flex items-center justify-center font-black text-primary animate-pulse tracking-widest text-xs uppercase">
+          Establishing Database Stream...
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-6 overflow-y-auto no-scrollbar pb-10">
+          {banners.map(banner => (
+            <div key={banner.id} className="glass-card overflow-hidden border-white/5 flex justify-between items-center group relative h-36 bg-white/[0.01] hover:border-primary/20 transition-all shadow-2xl">
+              {/* Background Visual Layer */}
+              {banner.type === 'image' ? (
+                <>
+                  <img src={banner.image} className="absolute inset-0 w-full h-full object-cover opacity-40 grayscale group-hover:grayscale-0 group-hover:opacity-60 transition-all duration-700" alt="" />
+                  <div className="absolute inset-0 bg-gradient-to-r from-black via-transparent to-transparent z-0" />
+                </>
+              ) : (
+                <div className={`absolute inset-0 bg-gradient-to-r ${banner.color} to-transparent opacity-30 group-hover:opacity-50 transition-opacity`} />
+              )}
 
-            {/* Content Layer */}
-            <div className="relative z-10 p-6">
-              <span className="text-[8px] font-black uppercase text-primary border border-primary/20 bg-black/40 px-2 py-0.5 rounded-full">{banner.tag}</span>
-              <h3 className="text-lg font-black uppercase italic mt-2 text-white drop-shadow-md">
-                {banner.type === 'image' ? 'Image Banner' : banner.title}
-              </h3>
+              {/* Data Layer */}
+              <div className="relative z-10 p-8">
+                <span className="text-[9px] font-black uppercase text-primary border border-primary/30 bg-primary/5 px-3 py-1 rounded-full tracking-widest">
+                  {banner.tag}
+                </span>
+                <h3 className="text-2xl font-black uppercase italic mt-3 text-white drop-shadow-2xl tracking-tighter">
+                  {banner.type === 'image' ? 'Visual Asset Optimized' : banner.title}
+                </h3>
+                <p className="text-[8px] text-gray-500 font-bold uppercase mt-2 opacity-60">Created: {new Date(banner.created_at).toLocaleDateString()}</p>
+              </div>
+              
+              {/* Controls */}
+              <div className="relative z-10 p-8">
+                <button 
+                  onClick={() => deleteBanner(banner.id)} 
+                  className="bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white px-6 py-3 rounded-xl transition-all font-black text-[10px] uppercase border border-red-500/20 active:scale-90"
+                >
+                  Terminate
+                </button>
+              </div>
             </div>
-            
-            <div className="relative z-10 p-6">
-              <button onClick={() => deleteBanner(banner.id)} className="bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white p-3 rounded-xl transition-all font-black text-[9px] uppercase border border-red-500/20">
-                Remove
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
-      {/* --- FLOATING MODAL --- */}
+      {/* --- FLOATING CONFIGURATION MODAL --- */}
       {showModal && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/80 backdrop-blur-xl animate-in fade-in duration-300">
-          <form onSubmit={saveBanner} className="glass-card p-10 w-full max-w-xl border-primary/20 bg-[#0a0a0a] shadow-2xl">
-            <h2 className="text-xl font-black italic uppercase text-primary mb-8 text-center tracking-tighter">Configure Slide</h2>
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/90 backdrop-blur-xl animate-in fade-in duration-500">
+          <form 
+            onSubmit={saveBanner} 
+            className="glass-card p-10 w-full max-w-xl border-primary/20 bg-[#0a0a0a] shadow-[0_0_100px_rgba(var(--primary-rgb),0.1)] space-y-8"
+          >
+            <div className="text-center">
+              <h2 className="text-2xl font-black italic uppercase text-primary tracking-tighter leading-none">Configure Asset</h2>
+              <p className="text-[9px] text-gray-600 font-black uppercase tracking-widest mt-2">Publish directly to customer frontend</p>
+            </div>
             
             <div className="space-y-6">
-              {/* Image Upload Toggle */}
-              <div className="grid grid-cols-1 gap-4">
-                <label className="block border-2 border-dashed border-white/10 rounded-2xl p-6 text-center cursor-pointer hover:border-primary/50 transition-all bg-white/[0.02]">
-                  <input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} />
-                  {preview ? (
-                    <div className="relative">
-                      <img src={preview} className="h-32 mx-auto rounded-xl object-cover shadow-2xl" alt="" />
-                      <p className="mt-2 text-[8px] font-black text-primary uppercase">Image Detected - Text Title Disabled</p>
-                    </div>
-                  ) : (
-                    <div className="py-4">
-                      <span className="text-2xl mb-2 block">🖼️</span>
-                      <span className="text-gray-500 text-[10px] font-black uppercase tracking-widest leading-none">Upload Visual Asset</span>
-                    </div>
-                  )}
-                </label>
-              </div>
+              {/* Asset Upload Segment */}
+              <label className="block border-2 border-dashed border-white/10 rounded-[2rem] p-10 text-center cursor-pointer hover:border-primary/50 transition-all bg-white/[0.01] group">
+                <input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} />
+                {preview ? (
+                  <div className="relative inline-block animate-in zoom-in duration-300">
+                    <img src={preview} className="h-40 rounded-2xl object-cover shadow-2xl border border-white/10" alt="" />
+                    <p className="mt-3 text-[9px] font-black text-primary uppercase animate-pulse">Image Mode Active</p>
+                  </div>
+                ) : (
+                  <div className="py-6">
+                    <span className="text-4xl mb-4 block grayscale group-hover:grayscale-0 transition-all duration-500">🖼️</span>
+                    <span className="text-gray-500 text-[11px] font-black uppercase tracking-[0.2em] leading-none">Drop High-Res Asset Here</span>
+                  </div>
+                )}
+              </label>
 
-              {/* Text Option (Only enabled if no image) */}
+              {/* Text Configuration (Dynamic UI) */}
               {!preview && (
-                <div className="animate-in slide-in-from-top-2 duration-300">
-                  <div className="flex flex-col gap-4">
+                <div className="animate-in slide-in-from-top-4 duration-500 space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-[9px] font-black text-gray-600 uppercase ml-2 tracking-widest">Offer Title</label>
                     <input 
                       type="text" 
-                      placeholder="Offer Title (e.g. 50% OFF)" 
+                      placeholder="e.g. FLASH 50% OFF" 
                       required={!preview}
-                      className="w-full bg-white/5 border border-white/10 p-5 rounded-2xl text-xs uppercase font-black text-white outline-none focus:border-primary" 
-                      onChange={e => setFormData({...formData, title: e.target.value, type: 'text'})} 
+                      className="w-full bg-white/5 border border-white/10 p-5 rounded-2xl text-xs uppercase font-black text-white outline-none focus:border-primary transition-all" 
+                      onChange={e => setFormData({...formData, title: e.target.value.toUpperCase(), type: 'text'})} 
                     />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <label className="text-[9px] font-black text-gray-600 uppercase ml-2 tracking-widest">Aura Color</label>
                     <select 
-                      className="w-full bg-[#111] border border-white/10 p-5 rounded-2xl text-[10px] font-black uppercase text-gray-400 outline-none" 
+                      className="w-full bg-[#111] border border-white/10 p-5 rounded-2xl text-[11px] font-black uppercase text-gray-400 outline-none focus:border-primary cursor-pointer" 
                       onChange={e => setFormData({...formData, color: e.target.value})}
                     >
-                      <option value="from-primary/30">Theme: Pink (Primary)</option>
-                      <option value="from-blue-500/20">Theme: Blue (Fresh)</option>
-                      <option value="from-green-500/20">Theme: Green (Express)</option>
+                      <option value="from-primary/30">Theme: Kilogram Pink</option>
+                      <option value="from-blue-500/20">Theme: Fresh Blue</option>
+                      <option value="from-green-500/20">Theme: Express Green</option>
+                      <option value="from-yellow-500/20">Theme: Bulk Gold</option>
                     </select>
                   </div>
                 </div>
               )}
 
-              <input 
-                type="text" 
-                placeholder="Marketing Tag (e.g. MEGA OFFER)" 
-                required 
-                className="w-full bg-white/5 border border-white/10 p-5 rounded-2xl text-xs uppercase font-black text-white outline-none focus:border-primary" 
-                onChange={e => setFormData({...formData, tag: e.target.value})} 
-              />
+              <div className="space-y-2">
+                <label className="text-[9px] font-black text-gray-600 uppercase ml-2 tracking-widest">Promotion Tag</label>
+                <input 
+                  type="text" 
+                  placeholder="e.g. LIMITED TIME SYNC" 
+                  required 
+                  className="w-full bg-white/5 border border-white/10 p-5 rounded-2xl text-xs uppercase font-black text-white outline-none focus:border-primary transition-all" 
+                  onChange={e => setFormData({...formData, tag: e.target.value.toUpperCase()})} 
+                />
+              </div>
             </div>
 
-            <div className="flex gap-4 mt-10">
-              <button type="button" onClick={resetForm} className="flex-1 text-gray-600 font-black text-[10px] uppercase hover:text-white transition-colors">Abort</button>
-              <button type="submit" className="flex-[2] bg-primary text-black py-5 rounded-2xl font-black text-[10px] uppercase shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all">
-                Publish to Store
+            <div className="flex gap-4 pt-4">
+              <button type="button" onClick={resetForm} className="flex-1 text-gray-600 font-black text-[11px] uppercase tracking-widest hover:text-white transition-colors">Cancle</button>
+              <button 
+                type="submit" 
+                disabled={isSubmitting}
+                className="flex-[2] bg-primary text-black py-5 rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 flex justify-center items-center gap-3"
+              >
+                {isSubmitting ? (
+                  <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                ) : "Publish"}
               </button>
             </div>
           </form>

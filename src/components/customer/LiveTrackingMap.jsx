@@ -1,77 +1,146 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { GoogleMap, useJsApiLoader, Marker, DirectionsRenderer } from '@react-google-maps/api';
+import { MapContainer, TileLayer, Marker, Polyline, useMap } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import { supabase } from '../../lib/supabase';
 
-const mapContainerStyle = { width: '100%', height: '100%' };
+// Fix for default Leaflet marker icons in React
+import markerIcon from 'leaflet/dist/images/marker-icon.png';
+import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 
-// Dark Mode Styles for the "Kilogram" theme
-const darkMapStyle = [
-  { elementType: "geometry", stylers: [{ color: "#212121" }] },
-  { elementType: "labels.text.stroke", stylers: [{ color: "#212121" }] },
-  { elementType: "labels.text.fill", stylers: [{ color: "#757575" }] },
-  { featureType: "road", elementType: "geometry", stylers: [{ color: "#303030" }] },
-  { featureType: "water", elementType: "geometry", stylers: [{ color: "#000000" }] },
-];
+let DefaultIcon = L.icon({
+  iconUrl: markerIcon,
+  shadowUrl: markerShadow,
+  iconSize: [25, 41],
+  iconAnchor: [12, 41]
+});
+L.Marker.prototype.options.icon = DefaultIcon;
 
-export default function LiveTrackingMap() {
-  const { isLoaded } = useJsApiLoader({
-    googleMapsApiKey: "YOUR_GOOGLE_MAPS_API_KEY" // Replace with your actual key
-  });
+// Custom Rider Icon
+const riderIcon = new L.Icon({
+  iconUrl: 'https://cdn-icons-png.flaticon.com/512/2972/2972185.png',
+  iconSize: [45, 45],
+  iconAnchor: [22, 22],
+});
 
-  const [deliveryPos, setDeliveryPos] = useState({ lat: 19.0760, lng: 72.8777 });
-  const [userPos] = useState({ lat: 19.0850, lng: 72.8900 });
-  const [directions, setDirections] = useState(null);
-
-  // Simulate movement toward user
+/**
+ * MapRecenter Component
+ * Automatically pans the map when positions change
+ */
+function MapRecenter({ center }) {
+  const map = useMap();
   useEffect(() => {
-    const interval = setInterval(() => {
-      setDeliveryPos(prev => ({
-        lat: prev.lat + 0.0001,
-        lng: prev.lng + 0.0001
-      }));
-    }, 3000);
-    return () => clearInterval(interval);
-  }, []);
+    if (center) map.panTo(center);
+  }, [center, map]);
+  return null;
+}
 
-  const fetchRoute = useCallback(() => {
-    if (!window.google) return;
-    const service = new window.google.maps.DirectionsService();
-    service.route(
-      {
-        origin: deliveryPos,
-        destination: userPos,
-        travelMode: window.google.maps.TravelMode.DRIVING,
-      },
-      (result, status) => {
-        if (status === "OK") setDirections(result);
+export default function LiveTrackingMap({ orderId }) {
+  const [deliveryPos, setDeliveryPos] = useState(null);
+  const [userPos, setUserPos] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const syncLogistics = useCallback(async () => {
+  try {
+    const { data: order } = await supabase
+      .from('orders')
+      .select(`status, address, user_id`)
+      .eq('id', orderId)
+      .single();
+
+    if (order) {
+      // 1. Fetch User Destination
+      const { data: addrData } = await supabase
+        .from('addresses')
+        .select('lat, lng')
+        .eq('user_id', order.user_id) // Match by user_id for better reliability
+        .eq('is_primary', true)
+        .maybeSingle();
+
+      // 2. Fetch Store Origin with hardcoded fallback to prevent infinite loading
+      const { data: settings } = await supabase
+        .from('settings')
+        .select('value')
+        .eq('key', 'store_location')
+        .maybeSingle();
+
+      // DEFAULT FALLBACK: Kudwa, Maharashtra coordinates if DB is empty
+      const defaultLat = 21.4586; 
+      const defaultLng = 80.2201;
+
+      const uPos = addrData ? [parseFloat(addrData.lat), parseFloat(addrData.lng)] : [defaultLat, defaultLng];
+      const sPos = settings?.value ? [parseFloat(settings.value.lat), parseFloat(settings.value.lng)] : [defaultLat - 0.01, defaultLng - 0.01];
+      
+      setUserPos(uPos);
+
+      // Simulation logic
+      if (order.status === 'Out for Delivery') {
+        setDeliveryPos([uPos[0] - 0.002, uPos[1] - 0.002]);
+      } else {
+        setDeliveryPos(sPos);
       }
-    );
-  }, [deliveryPos, userPos]);
+    }
+  } catch (err) {
+    console.error("Logistics Sync Error:", err.message);
+  } finally {
+    setLoading(false); // Force loading off even if data is partial
+  }
+}, [orderId]);
 
   useEffect(() => {
-    if (isLoaded) fetchRoute();
-  }, [isLoaded, fetchRoute]);
+    syncLogistics();
+    const channel = supabase.channel(`live_map_${orderId}`)
+      .on('postgres_changes', { event: 'UPDATE', table: 'orders', filter: `id=eq.${orderId}` }, syncLogistics)
+      .subscribe();
+    return () => supabase.removeChannel(channel);
+  }, [orderId, syncLogistics]);
 
-  if (!isLoaded) return <div className="h-full w-full bg-[#151515] animate-pulse" />;
+  if (loading || !deliveryPos) return (
+    <div className="h-full w-full bg-[#050505] flex items-center justify-center">
+      <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
 
   return (
-    <GoogleMap
-      mapContainerStyle={mapContainerStyle}
-      center={deliveryPos}
-      zoom={15}
-      options={{ styles: darkMapStyle, disableDefaultUI: true }}
-    >
-      {directions && (
-        <DirectionsRenderer 
-          directions={directions} 
-          options={{
-            polylineOptions: { strokeColor: "#ff007a", strokeWeight: 5 },
-            preserveViewport: true,
-            suppressMarkers: true 
-          }} 
+    <div className="h-full w-full relative leaflet-dark-mode">
+      <MapContainer 
+        center={deliveryPos} 
+        zoom={15} 
+        zoomControl={false}
+        className="h-full w-full bg-[#0a0a0a]"
+      >
+        <TileLayer
+          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+          attribution='&copy; OpenStreetMap'
         />
-      )}
-      <Marker position={deliveryPos} icon={{ url: "https://cdn-icons-png.flaticon.com/512/2972/2972185.png", scaledSize: new window.google.maps.Size(40, 40) }} />
-      <Marker position={userPos} />
-    </GoogleMap>
+        
+        <MapRecenter center={deliveryPos} />
+
+        {/* Path Polyline */}
+        {userPos && (
+          <Polyline 
+            positions={[deliveryPos, userPos]} 
+            pathOptions={{ color: '#ff4d94', weight: 4, opacity: 0.5, dashArray: '10, 10' }} 
+          />
+        )}
+
+        {/* Rider Marker */}
+        <Marker position={deliveryPos} icon={riderIcon} />
+
+        {/* Destination Marker */}
+        {userPos && (
+          <Marker position={userPos}>
+            <div className="w-4 h-4 bg-white border-2 border-primary rounded-full shadow-[0_0_10px_#ff4d94]"></div>
+          </Marker>
+        )}
+      </MapContainer>
+
+      {/* Custom Styles for Dark Mode Leaflet */}
+      <style dangerouslySetInnerHTML={{ __html: `
+        .leaflet-container { background: #0a0a0a !important; }
+        .leaflet-tile-pane { filter: brightness(0.6) invert(1) contrast(3) hue-rotate(190deg) saturate(0.3); }
+        .leaflet-grab { cursor: auto; }
+      `}} />
+    </div>
   );
 }
