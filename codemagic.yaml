@@ -4,6 +4,8 @@ workflows:
     instance_type: mac_mini_m1
     max_build_duration: 60
     environment:
+      # This line fixes the 'invalid source release: 21' error
+      java: 21 
       node: latest
       npm: latest
     scripts:
@@ -19,7 +21,6 @@ workflows:
       - name: Build Android APK
         script: | 
           cd android
-          # Force execution permission for the gradle wrapper
           chmod +x gradlew 
           ./gradlew assembleDebug
     artifacts:
