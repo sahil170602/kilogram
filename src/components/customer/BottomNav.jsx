@@ -13,7 +13,7 @@ export default function BottomNav() {
   ];
 
   return (
-    <div className="fixed bottom-6 left-6 right-6 h-20 glass-card flex justify-around items-center px-4 z-50 shadow-2xl shadow-primary/10 border-white/5 bg-black/60 backdrop-blur-xl max-w-lg mx-auto">
+    <div className="fixed bottom-1 left-6 right-6 h-20 glass-card flex justify-around items-center px-4 z-50 shadow-2xl shadow-primary/10 border-white/5 bg-black/60 backdrop-blur-xl max-w-lg mx-auto">
       {navItems.map((item) => (
         <Link key={item.path} to={item.path} className="flex-1">
           <div className={`flex flex-col items-center gap-1 py-2 px-4 rounded-2xl transition-all duration-300 mx-auto w-fit ${
